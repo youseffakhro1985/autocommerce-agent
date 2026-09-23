@@ -4,6 +4,7 @@ Ett persistent, policyföljande system för dropshipping på Amazon EU och eBay 
 
 - **Status för externa beroenden:** [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md) (VERIFIED / UNVERIFIED / BLOCKED / NEEDS OWNER ACTION)
 - **Arkitektur, agenter, loopar och säkerhetsregler:** [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+- **Tillväxtmotorer:** vinstmål 25k–1M SEK/mån med krav och väg till målet, kill/winner-regler, 80/20, vinnarmotor (15 frågor + förhandlingsunderlag), kassaflöde 7/30/60/90, annonsmotor (vinst efter annons), veckovis CEO review, fasstatus 0–12 i dashboarden.
 - **Det du behöver göra, steg för steg:** [`docs/OWNER_ACTIONS.md`](docs/OWNER_ACTIONS.md)
 
 ## Köra lokalt (simulering, inga riktiga pengar)
@@ -17,7 +18,9 @@ npm test                          # enhetstester + end-to-end-simulering (kräve
 ```
 
 ## Driftsättning
-Docker-image med `PROCESS=web` eller `PROCESS=worker`. Filerna `railway.json` och `render.yaml` finns med. Använd EU-region (Frankfurt). Hemligheter läggs bara i värdens variabler (se `.env.example`).
+**Primärt: Vercel** (eget projekt `autocommerce-agent`, region fra1) + Neon Postgres. `api/index.js` kör hela appen serverless; `/api/cron` (Vercel Cron, CRON_SECRET) och `/api/tick` (GitHub Actions var 30:e min, strypt, idempotent) driver alla jobb.
+
+Alternativt: Docker-image med `PROCESS=web` eller `PROCESS=worker`. Filerna `railway.json` och `render.yaml` finns med. Använd EU-region (Frankfurt). Hemligheter läggs bara i värdens variabler (se `.env.example`).
 
 ## Lägen
 | `APP_MODE` | Marknadsplatser/leverantörer | Pengar |

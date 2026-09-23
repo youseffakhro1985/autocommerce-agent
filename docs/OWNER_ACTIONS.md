@@ -2,11 +2,12 @@
 
 Varje steg är en enda sak. Allt annat gör systemet. Gör dem när du vill; systemet väntar och påminner i dashboarden.
 
-## Fas A – Infrastruktur (ingen marknadsplats, inga pengar)
-1. **Skapa ett Railway-konto** (railway.com) och ett nytt projekt från den här koden (GitHub-repo eller `railway up`). Lägg till en **PostgreSQL** i projektet.
-2. **Skapa två tjänster** från samma kod: `web` med variabeln `PROCESS=web` och `worker` med `PROCESS=worker`. Båda: `APP_MODE=simulation`, `DATABASE_URL=${{Postgres.DATABASE_URL}}`, `DASHBOARD_PASSWORD=<långt slumpat lösenord>`.
-3. **Öppna dashboarden** (web-tjänstens URL) och se att simuleringen kör: produkter bedöms, listningar och ordrar skapas mot mockar.
-4. (Valfritt) **Lägg in `NOTIFY_WEBHOOK_URL`** (t.ex. Slack/Discord incoming webhook) eller `RESEND_API_KEY` + `OWNER_EMAIL` för notiser.
+## Fas A – Infrastruktur (Vercel + GitHub, helt isolerat från Revalta)
+1. **Logga in på GitHub** i Claude-appens webbläsarpanel (Cmd+Shift+B) – Claude skapar då repot `autocommerce-agent` (privat).
+2. **Skapa en fine-grained token** endast för `autocommerce-agent` (Contents + Workflows: Read and write, 90 dagar) och ge den till Claude – Claude pushar koden och skapar Vercel-projektet `autocommerce-agent` kopplat till repot.
+3. **Koppla databas:** Vercel → projektet `autocommerce-agent` → Storage → Create Database → Neon → Connect. (Dashboarden visar en setup-sida tills detta är gjort.)
+4. **Sätt `CURRENT_CASH_SEK`** i dashboardens Settings (tillgänglig kassa). Utan den blockeras alla inköp.
+5. GitHub Actions (`heartbeat`) kör systemet var 30:e minut; Vercel Cron en gång per dygn. Med Vercel Pro kan cron köras varje minut.
 
 ## Fas B – Konton och nycklar (du måste göra dessa själv – identitet/avtal)
 5. **Amazon:** skapa/verifiera ett *Professional*-konto på Seller Central Europe (identitets- och bankverifiering sker hos Amazon).
