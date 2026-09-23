@@ -1,0 +1,37 @@
+{
+  "name": "autocommerce-agent",
+  "version": "1.0.0",
+  "description": "Autonomous, policy-compliant e-commerce operations system (Amazon EU / eBay EU)",
+  "main": "dist/src/server.js",
+  "scripts": {
+    "build": "tsc -p . && mkdir -p dist/src/db/migrations && cp src/db/migrations/*.sql dist/src/db/migrations/",
+    "start:web": "node dist/src/server.js",
+    "start:worker": "node dist/src/worker.js",
+    "dev:web": "tsx src/server.ts",
+    "dev:worker": "tsx src/worker.ts",
+    "migrate": "node dist/src/db/migrate.js",
+    "simulate": "tsx scripts/simulate.ts",
+    "test": "vitest run",
+    "typecheck": "tsc -p . --noEmit",
+    "migrate:dev": "tsx src/db/migrate.ts"
+  },
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@fastify/formbody": "^9.0.0",
+    "fastify": "^5.12.5",
+    "pg": "^8.23.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.4",
+    "@types/pg": "^8.23.1",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.1"
+  },
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  }
+}

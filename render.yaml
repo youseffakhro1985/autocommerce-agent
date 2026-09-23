@@ -1,0 +1,33 @@
+# Render Blueprint: web + background worker + managed Postgres. Secrets are set in the dashboard (sync: false).
+databases:
+  - name: autocommerce-db
+    plan: basic-256mb
+    region: frankfurt
+services:
+  - type: web
+    name: autocommerce-web
+    runtime: docker
+    region: frankfurt
+    healthCheckPath: /healthz
+    envVars: &env
+      - key: PROCESS
+        value: web
+      - key: APP_MODE
+        value: simulation
+      - key: DATABASE_URL
+        fromDatabase: { name: autocommerce-db, property: connectionString }
+      - key: DASHBOARD_PASSWORD
+        sync: false
+      - key: NOTIFY_WEBHOOK_URL
+        sync: false
+  - type: worker
+    name: autocommerce-worker
+    runtime: docker
+    region: frankfurt
+    envVars:
+      - key: PROCESS
+        value: worker
+      - key: APP_MODE
+        value: simulation
+      - key: DATABASE_URL
+        fromDatabase: { name: autocommerce-db, property: connectionString }
