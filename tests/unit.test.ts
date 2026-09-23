@@ -115,7 +115,7 @@ describe('compliance', () => {
 
 describe('scoring & decision', () => {
   const good = { estMonthlySales: 400, offerCount: 3, amazonIsSeller: false, topReviewCount: 200, adIntensity: 'LOW' as const, netMarginPct: 35, trendIndex: 20,
-    supplierReliability: 94, deliveryDaysMax: 4, expectedReturnRate: 0.03, complianceRisk: 'LOW' as const, priceStddevPct: 3, stock: 200, stockBuffer: 20 };
+    supplierReliability: 94, deliveryDaysMax: 4, expectedReturnRate: 0.03, complianceRisk: 'LOW' as const, priceStddevPct: 3, stock: 200, stockBuffer: 20, rating: 4.2, negativeThemeCount: 2 };
   it('scores a good opportunity high with reasons', () => {
     const s = scoreOpportunity(good);
     expect(s.score).toBeGreaterThan(75);

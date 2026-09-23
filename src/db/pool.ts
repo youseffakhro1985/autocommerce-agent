@@ -9,9 +9,12 @@ let pool: pg.Pool | undefined;
 export function db(): pg.Pool {
   if (!pool) {
     const url = env().DATABASE_URL;
+    if (!url) throw new Error('DATABASE_URL is not configured');
+    const serverless = !!process.env.VERCEL;
     pool = new pg.Pool({
       connectionString: url,
-      max: 20,
+      max: serverless ? 5 : 20,
+      idleTimeoutMillis: serverless ? 5_000 : 30_000,
       ssl: /sslmode=require/.test(url) ? { rejectUnauthorized: false } : undefined,
     });
   }

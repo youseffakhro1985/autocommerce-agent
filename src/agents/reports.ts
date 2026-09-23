@@ -68,21 +68,54 @@ export async function runDailyReport(force = false) {
 
 export async function runWeeklyStrategy() {
   const now = new Date();
-  const week = `${now.getUTCFullYear()}-W${String(Math.ceil(((+now - +new Date(Date.UTC(now.getUTCFullYear(), 0, 1))) / 864e5 + new Date(Date.UTC(now.getUTCFullYear(), 0, 1)).getUTCDay() + 1) / 7)).padStart(2, '0')}`;
-  const perf = await many(`SELECT l.sku, p.title, l.status, count(oi.id)::int orders, COALESCE(sum(oi.unit_price_sek*oi.quantity),0)::numeric(12,2) revenue,
-      (SELECT net_margin_pct FROM profit_calculations pc WHERE pc.product_id=l.product_id ORDER BY created_at DESC LIMIT 1) margin
-    FROM listings l JOIN products p ON p.id=l.product_id LEFT JOIN order_items oi ON oi.listing_id=l.id
-    LEFT JOIN orders o ON o.id=oi.order_id AND o.placed_at > now() - interval '28 days'
-    GROUP BY l.sku, p.title, l.status, l.product_id ORDER BY revenue DESC`);
-  const rejectReasons = await many(`SELECT reason, count(*)::int n FROM (SELECT jsonb_array_elements_text(decision_reasons) reason FROM product_scores WHERE created_at > now() - interval '7 days' AND decision='REJECTED') x GROUP BY reason ORDER BY n DESC LIMIT 10`);
-  const recs: string[] = [];
-  for (const p of perf) {
-    if (p.orders === 0 && p.status === 'ACTIVE') recs.push(`Consider ending ${p.sku} (no orders in 28 days) to free a slot for a better opportunity.`);
-    if (p.margin != null && Number(p.margin) < 25 && p.orders > 0) recs.push(`${p.sku} margin ${p.margin}% — close to the floor; check supplier alternatives.`);
-  }
-  const text = [`WEEKLY STRATEGY ${week}`, '', 'Listing performance (28d):', ...perf.map((p) => `- ${p.sku} ${p.status}: ${p.orders} orders, ${p.revenue} SEK, margin ${p.margin ?? '?'}%`),
-    '', 'Top rejection reasons (7d):', ...rejectReasons.map((r) => `- ${r.n}× ${r.reason}`), '', 'Recommendations:', ...(recs.length ? recs.map((r) => '- ' + r) : ['- Keep current set; no action needed.'])].join('\n');
-  const ins = await db().query(`INSERT INTO reports(kind, period_key, body, text) VALUES ('WEEKLY',$1,$2,$3) ON CONFLICT (kind, period_key) DO NOTHING RETURNING id`, [week, JSON.stringify({ perf, rejectReasons, recs }), text]);
-  if (ins.rowCount) await notify(`Weekly strategy ${week}`, text);
+  const jan1 = new Date(Date.UTC(now.getUTCFullYear(), 0, 1));
+  const week = `${now.getUTCFullYear()}-W${String(Math.ceil(((+now - +jan1) / 864e5 + jan1.getUTCDay() + 1) / 7)).padStart(2, '0')}`;
+  const r = await buildCeoReview();
+  const ins = await db().query(`INSERT INTO reports(kind, period_key, body, text) VALUES ('WEEKLY',$1,$2,$3) ON CONFLICT (kind, period_key) DO NOTHING RETURNING id`, [week, JSON.stringify(r.body), r.text]);
+  if (ins.rowCount) await notify(`CEO review ${week}`, r.text);
   return { week, created: !!ins.rowCount };
+}
+
+/** Weekly CEO review — every figure from the ledger; scenario items labelled. */
+export async function buildCeoReview() {
+  const { growthSnapshot } = await import('./growth.js');
+  const { adMetrics } = await import('../domain/economics.js');
+  const g = await growthSnapshot();
+  const sum = (f: (x: any) => number) => g.skus.reduce((a: number, x: any) => a + f(x), 0);
+  const orders = sum((x) => x.orders), revenue = sum((x) => x.revenueGross), contribution = sum((x) => x.contribution);
+  const adAgg = g.ads.reduce((a: any, x: any) => ({ spend: a.spend + x.spend, adSales: a.adSales + x.ad_sales, adOrders: a.adOrders + x.ad_orders, clicks: a.clicks + x.clicks, impressions: a.impressions + x.impressions }), { spend: 0, adSales: 0, adOrders: 0, clicks: 0, impressions: 0 });
+  const am = adMetrics({ ...adAgg, totalSales: revenue });
+  const refunds = await one(`SELECT COALESCE(-sum(amount_sek),0)::float r FROM transactions WHERE kind='REFUND' AND occurred_at > now() - interval '30 days'`);
+  const returns = sum((x) => x.returns);
+  const killed = await many(`SELECT l.sku, l.pause_reason FROM listings l WHERE l.stage='KILLED' AND l.stage_changed_at > now() - interval '7 days'`);
+  const newOpps = await many(`SELECT * FROM (SELECT DISTINCT ON (p.id) p.id, p.title, ps.score FROM product_scores ps JOIN products p ON p.id=ps.product_id WHERE ps.decision='APPROVED_FOR_LISTING' AND ps.created_at > now() - interval '7 days' ORDER BY p.id, ps.score DESC) x ORDER BY score DESC LIMIT 5`);
+  const supplierOpps = g.winnersAnalyses.filter((w: any) => w.negotiation).map((w: any) => `${w.sku}: ${w.negotiation.current}→${w.negotiation.target} ${w.negotiation.currency}, saving ${w.negotiation.expectedSavingPerMonth} ${w.negotiation.currency}/mo`);
+  const health = await many(`SELECT code, health_status, automation_state FROM marketplaces WHERE enabled`);
+  const owner = await many(`SELECT title FROM alerts WHERE requires_owner AND resolved_at IS NULL ORDER BY created_at DESC LIMIT 10`);
+  const declining = g.skus.filter((x: any) => x.growthPct != null && x.growthPct < -20);
+  const kr = (n: any) => `${Math.round(Number(n ?? 0)).toLocaleString('sv-SE')} SEK`;
+
+  const actions: string[] = [];
+  for (const o of g.path.options.slice(0, 3)) actions.push(`[${o.basis}] ${o.lever}: ${o.description}${o.estMonthlyProfitGain ? ` (≈ ${kr(o.estMonthlyProfitGain)}/mo)` : ''}`);
+  for (const w of g.winnersAnalyses) for (const q of w.analysis.filter((q: any) => q.status === 'OPPORTUNITY' && q.estMonthlyImpactSek)) actions.push(`[${q.basis}] ${w.sku} — ${q.q} ${q.evidence} (≈ ${kr(q.estMonthlyImpactSek)}/mo)`);
+  for (const k of g.top.kill) actions.push(`[REAL] Kill ${k.sku}: ${k.orders} orders, profit ${kr(k.contribution)}`);
+  if (g.cash.forecast.breachDay != null) actions.unshift(`[SCENARIO] CASH: buffer breached in ${g.cash.forecast.breachDay} days — secure capital or slow purchases first`);
+  if (!orders) actions.push('No real sales yet: complete the owner actions below so live research and listings can start.');
+
+  const text = [
+    `CEO REVIEW — ${new Date().toISOString().slice(0, 10)} (${g.mode.toUpperCase()}; last 30 days)`,
+    `Revenue ${kr(revenue)} · Real contribution ${kr(contribution)} · Operating profit ${kr(g.currentProfit)} [${g.base.basis}]`,
+    `Margin ${revenue ? ((contribution / revenue) * 100).toFixed(1) : '—'} % · Orders ${orders} · CAC ${am.cac ?? '—'} · ROAS ${am.roas ?? '—'} · Return rate ${orders ? ((returns / orders) * 100).toFixed(1) : '—'} % · Refunds ${kr(refunds?.r)}`,
+    `Top winners: ${g.top.profit.slice(0, 3).map((x: any) => `${x.sku} ${kr(x.contribution)}`).join(', ') || '—'}`,
+    `Declining: ${declining.map((x: any) => `${x.sku} ${x.growthPct} %`).join(', ') || '—'}`,
+    `Killed this week: ${killed.map((k) => k.sku).join(', ') || '—'}`,
+    `New opportunities: ${newOpps.map((o) => `#${o.id} ${o.title} (${Number(o.score).toFixed(0)})`).join('; ') || '—'}`,
+    `Supplier opportunities: ${supplierOpps.join('; ') || '—'}`,
+    `Cash flow: 7d ${kr(g.cash.forecast.at[7])} · 30d ${kr(g.cash.forecast.at[30])} · 90d ${kr(g.cash.forecast.at[90])}${g.cash.forecast.breachDay != null ? ` · BREACH day ${g.cash.forecast.breachDay}` : ''}`,
+    `Marketplace health: ${health.map((h) => `${h.code} ${h.health_status}/${h.automation_state}`).join(', ')}`,
+    `Target ${g.nextTarget.toLocaleString('sv-SE')} SEK: gap ${kr(Math.max(0, g.nextTarget - g.currentProfit))}`,
+    '', 'WHAT SHOULD WE DO NEXT TO MAXIMIZE PROFIT?', ...actions.slice(0, 8).map((a, i) => `${i + 1}. ${a}`),
+    ...(owner.length ? ['', 'Needs you:', ...owner.map((o) => `- ${o.title}`)] : []),
+  ].join('\n');
+  return { body: { revenue, contribution, orders, actions, path: g.path, cash: g.cash.forecast.at }, text };
 }

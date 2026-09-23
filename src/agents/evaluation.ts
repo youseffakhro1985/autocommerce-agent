@@ -79,6 +79,8 @@ export async function runEvaluation(limit = 200) {
         supplierReliability: sp ? Number(sp.reliability_score) : null, deliveryDaysMax: sp?.delivery_days_max ?? null, expectedReturnRate: returnRate,
         complianceRisk: compliance.riskLevel, priceStddevPct: research.price_stddev_pct != null ? Number(research.price_stddev_pct) : null,
         stock: sp?.stock ?? null, stockBuffer: c.s.MIN_STOCK_BUFFER,
+        rating: research.rating != null ? Number(research.rating) : null,
+        negativeThemeCount: (await one<{ n: number }>(`SELECT count(*)::int n FROM review_insights WHERE product_id=$1`, [p.id]))?.n || null,
       });
       const d = decide({
         productId: p.id, salePrice: marketPrice ?? 0, profit, supplierReliability: sp ? Number(sp.reliability_score) : null,

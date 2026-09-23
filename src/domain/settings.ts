@@ -51,6 +51,25 @@ export const DEFAULT_SETTINGS = {
   MIN_VALID_TRACKING_PCT: { v: 97, d: 'Pause if valid tracking rate below (Amazon target >95%)' },
   TRACKING_MISSING_AFTER_HOURS: { v: 48, d: 'Alert if no tracking this many hours after supplier order' },
 
+  // --- Lifecycle: test → winner → scale / kill
+  TEST_PERIOD_DAYS: { v: 21, d: 'Test period before a product must hit minimum KPIs' },
+  MIN_TEST_ORDERS: { v: 5, d: 'Minimum orders during test period, else KILL' },
+  WINNER_MIN_ORDERS_30D: { v: 20, d: 'Orders in 30 days to be classified WINNER' },
+  WINNER_MIN_CONTRIBUTION_MARGIN_PCT: { v: 18, d: 'Min real contribution margin % (after ads) for WINNER' },
+  MAX_REAL_RETURN_RATE_PCT: { v: 10, d: 'Observed return rate above this => pause & investigate' },
+  MAX_NEW_PRODUCT_TEST_BUDGET_SEK: { v: 1500, d: 'Max ad + sample spend per product test' },
+
+  // --- Capital & cash flow
+  MAX_SINGLE_PURCHASE_SEK: { v: 5000, d: 'Max single inventory/wholesale purchase without approval' },
+  MAX_INVENTORY_COMMITMENT_SEK: { v: 20000, d: 'Max total open inventory commitments' },
+  FIXED_COSTS_MONTHLY_SEK: { v: 2500, d: 'Fixed monthly costs (subscriptions, tools). Owner-maintained' },
+  PAYOUT_DELAY_DAYS: { v: 14, d: 'Assumed days from sale to marketplace payout (scenario assumption until payout data exists)' },
+  VAT_PAYMENT_INTERVAL_DAYS: { v: 90, d: 'VAT settlement interval (90 = quarterly, 30 = monthly)' },
+
+  // --- Advertising (profit-first)
+  MIN_PROFIT_AFTER_ADS_SEK: { v: 30, d: 'Min profit per order after advertising' },
+  AD_SCALE_STEP_PCT: { v: 15, d: 'Budget increase step for profitable campaigns' },
+
   // --- Automation switches & staged go-live (section 24.15)
   AUTOMATION_ENABLED: { v: true, d: 'Global kill switch' },
   GO_LIVE_STAGE: { v: 0, d: '0=read-only research, 1=+listings, 2=+auto orders, 3=+repricing, 4=full' },

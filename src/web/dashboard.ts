@@ -3,6 +3,7 @@ import { many, one } from '../db/pool.js';
 import { loadSettings, DEFAULT_SETTINGS } from '../domain/settings.js';
 import { env } from '../config/env.js';
 import { JOBS } from '../scheduler.js';
+import { renderGrowth, GROWTH_CSS } from './growth.js';
 
 export const esc = (v: unknown) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 const kr = (n: unknown) => `${Math.round(Number(n ?? 0)).toLocaleString('sv-SE')} kr`;
@@ -51,8 +52,9 @@ export async function loadDashboard() {
   const listings = await many(`SELECT l.id, l.sku, l.marketplace_code, l.status, l.price, l.min_price, l.quantity, l.pause_reason, p.title FROM listings l JOIN products p ON p.id=l.product_id ORDER BY l.status, l.id LIMIT 40`);
   const jobs = await many(`SELECT DISTINCT ON (job) job, status, started_at, finished_at, error FROM job_runs ORDER BY job, started_at DESC`);
   const settings = await loadSettings();
+  const growthHtml = await renderGrowth();
   const report = await one(`SELECT period_key, text FROM reports WHERE kind='DAILY' ORDER BY period_key DESC LIMIT 1`);
-  return { today, todayOrders, todayReturns, products, listingsPaused, opps, suppliers, marketplaces, alerts, approvals, finance, daily, decisions, orders, listings, jobs, settings, report };
+  return { growthHtml, today, todayOrders, todayReturns, products, listingsPaused, opps, suppliers, marketplaces, alerts, approvals, finance, daily, decisions, orders, listings, jobs, settings, report };
 }
 
 function statusChip(s: string) {
@@ -115,6 +117,7 @@ button{background:var(--accent);color:#fff;border:0;border-radius:6px;padding:4p
 input,select{background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:3px 6px;font:inherit;width:110px}form.inline{display:inline-flex;gap:6px}
 pre{white-space:pre-wrap;font-size:12px;background:var(--bg);padding:10px;border-radius:8px;margin:0}code{font-size:12px}
 .banner{padding:8px 12px;border-radius:8px;border:1px solid var(--critical);margin-top:6px}
+${GROWTH_CSS}
 </style></head><body>
 <header><div><h1>AutoCommerce Control</h1><div class="muted">Mode <b>${esc(e.APP_MODE.toUpperCase())}</b> · Go-live stage ${esc(stage)}${e.APP_MODE === 'live' ? '' : ' (applies in live mode)'} · Automation ${d.settings.AUTOMATION_ENABLED ? statusChip('ACTIVE') : statusChip('PAUSED')}</div></div>
 <div style="display:flex;gap:8px;flex-wrap:wrap"><form method="post" action="/settings"><input type="hidden" name="key" value="AUTOMATION_ENABLED"/><input type="hidden" name="value" value="${d.settings.AUTOMATION_ENABLED ? 'false' : 'true'}"/>
@@ -124,6 +127,8 @@ pre{white-space:pre-wrap;font-size:12px;background:var(--bg);padding:10px;border
 ${tile('Revenue', kr(d.today?.revenue))}${tile('Orders', String(d.todayOrders?.n ?? 0))}${tile('Gross profit', kr(d.today?.gross), 'net of VAT − COGS − shipping')}
 ${tile('Est. net profit', kr(d.today?.net), 'after fees, VAT, reserves')}${tile('Ad spend', kr(d.today?.ads))}${tile('Returns', String(d.todayReturns?.n ?? 0))}</div>
 ${crit ? `<div class="banner">${statusChip('CRITICAL')} ${crit} critical issue(s) — see Alerts</div>` : ''}</section>
+${d.growthHtml}
+
 
 <section><h2>Alerts</h2>${d.alerts.length ? `<div class="scroll"><table>${d.alerts.map((a) => `<tr><td>${statusChip(a.severity)}</td><td>${esc(a.title)}${a.requires_owner ? ' <span class="muted">· needs you</span>' : ''}<div class="muted">${esc(new Date(a.created_at).toLocaleString('sv-SE'))}</div></td>
   <td><form method="post" action="/alerts/${a.id}/resolve"><button class="secondary">Resolve</button></form></td></tr>`).join('')}</table></div>` : '<p class="muted">No open alerts.</p>'}</section>

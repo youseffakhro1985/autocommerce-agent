@@ -1,14 +1,8 @@
-import { readdirSync, readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { MIGRATIONS } from './migrations.generated.js';
 import { db, closeDb } from './pool.js';
 import { seedSettings } from '../domain/settings.js';
 
-const here = dirname(fileURLToPath(import.meta.url));
-// migrations live in src/db/migrations (copied next to dist by the build script)
-const MIGRATIONS_DIR = [join(here, 'migrations'), join(here, '../../../src/db/migrations')].find((p) => {
-  try { readdirSync(p); return true; } catch { return false; }
-})!;
 
 /** Marketplace IDs per SP-API "Marketplace IDs" docs / eBay MarketplaceIdEnum. VAT = destination standard rate. */
 const MARKETPLACES = [
@@ -35,11 +29,9 @@ const FEES = [
 export async function migrate() {
   const pool = db();
   await pool.query('CREATE TABLE IF NOT EXISTS schema_migrations (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())');
-  const files = readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).sort();
-  for (const f of files) {
+  for (const { name: f, sql } of MIGRATIONS) {
     const done = await pool.query('SELECT 1 FROM schema_migrations WHERE name=$1', [f]);
     if (done.rowCount) continue;
-    const sql = readFileSync(join(MIGRATIONS_DIR, f), 'utf8');
     const c = await pool.connect();
     try {
       await c.query('BEGIN');

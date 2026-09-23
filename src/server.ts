@@ -9,7 +9,7 @@ import { updateSetting, DEFAULT_SETTINGS } from './domain/settings.js';
 import { audit } from './services/audit.js';
 import { raiseAlert } from './services/alerts.js';
 import { loadDashboard, renderDashboard } from './web/dashboard.js';
-import { JOBS, runJob } from './scheduler.js';
+import { JOBS, runJob, runDueJobs } from './scheduler.js';
 
 export async function buildServer() {
   const e = env();
@@ -18,8 +18,34 @@ export async function buildServer() {
 
   const safeEq = (a: string, b: string) => { const x = Buffer.from(a), y = Buffer.from(b); return x.length === y.length && timingSafeEqual(x, y); };
 
+  // No database yet (fresh Vercel project): show a setup page instead of crashing.
+  if (!e.DATABASE_URL) {
+    app.get('/*', async (_req, reply) => reply.code(503).type('text/html; charset=utf-8').send(setupPage()));
+    return app;
+  }
+  let migrated: Promise<void> | null = null;
+  app.addHook('onRequest', async () => { migrated ??= migrate(); await migrated; });
+
+  // Scheduler entry for serverless hosts (Vercel Cron sends Authorization: Bearer $CRON_SECRET; external pingers may use ?secret=).
+  app.get<{ Querystring: { secret?: string } }>('/api/cron', async (req, reply) => {
+    const bearer = String(req.headers.authorization ?? '').replace(/^Bearer /, '');
+    const given = bearer || String(req.query.secret ?? '');
+    if (!e.CRON_SECRET || !safeEq(given, e.CRON_SECRET)) return reply.code(401).send({ ok: false });
+    return runDueJobs(Number(process.env.CRON_BUDGET_MS ?? 240_000));
+  });
+
+  // Public, secret-less heartbeat for external schedulers (GitHub Actions). It can only run jobs that are
+  // already due (all idempotent, all spend-limited) and is throttled to one run per 4 minutes.
+  app.get('/api/tick', async (_req, reply) => {
+    const last = await db().query(`SELECT max(started_at) t FROM job_runs WHERE job='orders.cycle'`);
+    const t = last.rows[0]?.t ? new Date(last.rows[0].t).getTime() : 0;
+    if (Date.now() - t < 4 * 60_000) return reply.code(202).send({ ok: true, throttled: true });
+    const r = await runDueJobs(Number(process.env.CRON_BUDGET_MS ?? 240_000));
+    return { ok: true, ms: r.ms, ran: Object.entries(r.results).filter(([, v]) => v === 'OK' || v === 'FAILED').map(([k, v]) => `${k}:${v}`) };
+  });
+
   app.addHook('onRequest', async (req, reply) => {
-    if (req.url === '/healthz' || req.url.startsWith('/webhooks/')) return;
+    if (req.url === '/healthz' || req.url.startsWith('/webhooks/') || req.url.startsWith('/api/cron') || req.url === '/api/tick') return;
     // Basic auth (HTTPS terminates at the platform). Simulation without password = local only.
     if (e.DASHBOARD_PASSWORD) {
       const h = req.headers.authorization ?? '';
@@ -126,6 +152,16 @@ export async function buildServer() {
   });
 
   return app;
+}
+
+function setupPage() {
+  return `<!doctype html><html lang="sv"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>AutoCommerce – setup</title>
+<style>:root{--bg:#f6f6f4;--ink:#0b0b0b;--muted:#52514e;--line:#e4e3df}@media (prefers-color-scheme:dark){:root{--bg:#121211;--ink:#fff;--muted:#c3c2b7;--line:#2e2e2b}}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,sans-serif}main{max-width:640px;margin:48px auto;padding:0 16px}
+.card{border:1px solid var(--line);border-radius:10px;padding:18px 20px}code{font-size:13px}p{color:var(--muted)}</style></head>
+<body><main><h1>AutoCommerce är driftsatt ✓</h1><div class="card"><b>NEEDS OWNER ACTION:</b> koppla en databas.
+<p>Vercel → projektet <code>autocommerce-agent</code> → <b>Storage</b> → <b>Create Database</b> → <b>Neon (Postgres)</b> → Create → Connect till <code>autocommerce-agent</code>.
+Därefter startar systemet automatiskt vid nästa deploy.</p></div></main></body></html>`;
 }
 
 if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split('/').pop()!)) {

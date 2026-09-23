@@ -1,0 +1,15 @@
+# External scheduler: Vercel Hobby cron only runs daily, so GitHub Actions pings the
+# throttled, idempotent /api/tick endpoint every 30 minutes (fits the free Actions quota).
+name: heartbeat
+on:
+  schedule: [{ cron: '*/30 * * * *' }]
+  workflow_dispatch: {}
+permissions: {}
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - run: curl -fsS --max-time 300 "${APP_URL:-https://autocommerce-agent.vercel.app}/api/tick"
+        env:
+          APP_URL: ${{ vars.APP_URL }}

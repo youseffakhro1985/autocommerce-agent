@@ -96,16 +96,19 @@ export class MockSupplier implements SupplierAdapter {
     return { externalRef: ref };
   }
   get placedCount() { return this.orders.size; }
+  /** Stateless across serverless cold starts: our own references ("AC-SO-…") are always found. */
   async findOrderByReference(reference: string) {
     const o = this.orders.get(reference);
-    return o ? { externalRef: o.ref, status: 'PLACED' } : null;
+    if (o) return { externalRef: o.ref, status: 'PLACED' };
+    return this.statelessRefs && reference.startsWith('AC-SO-') ? { externalRef: 'MS-' + reference.slice(6), status: 'PLACED' } : null;
   }
+  public statelessRefs = !!process.env.VERCEL;
   /** Simulation hook: suppress tracking to test "missing tracking" alerts. */
   public withholdTracking = false;
   async getTracking(orders: { reference: string; externalRef: string }[]): Promise<SupplierTracking[]> {
     if (this.withholdTracking) return [];
-    return orders.map((o) => o.reference).filter((r) => this.orders.has(r)).map((r) => ({
-      reference: r, carrier: 'PostNord', trackingNumber: 'PN' + this.orders.get(r)!.ref.replace(/\D/g, '') + 'SE',
+    return orders.map((o) => o.reference).filter((r) => this.orders.has(r) || (this.statelessRefs && r.startsWith('AC-SO-'))).map((r) => ({
+      reference: r, carrier: 'PostNord', trackingNumber: 'PN' + (this.orders.get(r)?.ref ?? r).replace(/\D/g, '') + 'SE',
       trackingUrl: 'https://tracking.example/' + r, shippedAt: new Date(), delivered: false,
     }));
   }

@@ -9,7 +9,9 @@ const schema = z.object({
   NODE_ENV: z.string().default('production'),
   APP_MODE: z.enum(['simulation', 'sandbox', 'live']).default('simulation'),
   PORT: z.coerce.number().default(3000),
-  DATABASE_URL: z.string().min(1),
+  DATABASE_URL: z.string().min(1).optional(),   // missing => dashboard shows setup page
+  CRON_SECRET: z.string().optional(),           // Vercel Cron sends 'Authorization: Bearer <CRON_SECRET>'
+  SIM_DEMAND: z.string().optional(),            // '1' => simulation generates fake customer demand
   DASHBOARD_USER: z.string().default('owner'),
   DASHBOARD_PASSWORD: z.string().optional(),
   WEBHOOK_SHARED_SECRET: z.string().optional(),
@@ -57,7 +59,8 @@ export type Env = z.infer<typeof schema>;
 let cached: Env | undefined;
 export function env(): Env {
   if (!cached) {
-    const parsed = schema.safeParse(process.env);
+    // Vercel Marketplace Postgres (Neon) may expose POSTGRES_URL instead of DATABASE_URL.
+    const parsed = schema.safeParse({ ...process.env, DATABASE_URL: process.env.DATABASE_URL || process.env.POSTGRES_URL || undefined });
     if (!parsed.success) {
       throw new Error('Invalid environment: ' + parsed.error.issues.map((i) => i.path.join('.')).join(', '));
     }

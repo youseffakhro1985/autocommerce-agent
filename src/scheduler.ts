@@ -14,6 +14,7 @@ import { runHealth } from './agents/health.js';
 import { runReturns } from './agents/support.js';
 import { runDailyReport, runWeeklyStrategy } from './agents/reports.js';
 import { runSelfCheck, runFx } from './agents/ops.js';
+import { runLifecycle, runCashGuard, runAds } from './agents/growth.js';
 
 export interface JobDef { name: string; everyMin: number; timeoutMin: number; run: () => Promise<unknown>; when?: () => boolean }
 
@@ -34,6 +35,9 @@ export const JOBS: JobDef[] = [
   { name: 'sourcing.match', everyMin: 360, timeoutMin: 30, run: runSourcing },
   { name: 'evaluation.run', everyMin: 60, timeoutMin: 20, run: () => runEvaluation() },
   { name: 'listing.publish', everyMin: 60, timeoutMin: 20, run: runListing },
+  { name: 'growth.lifecycle', everyMin: 360, timeoutMin: 15, run: runLifecycle },      // kill / winner / investigate
+  { name: 'growth.cash', everyMin: 360, timeoutMin: 5, run: runCashGuard },            // cash-flow early warning
+  { name: 'growth.ads', everyMin: 360, timeoutMin: 10, run: runAds },                  // profit-first ad decisions
   { name: 'health.check', everyMin: 240, timeoutMin: 15, run: runHealth },
   { name: 'support.returns', everyMin: 60, timeoutMin: 10, run: runReturns },
   { name: 'reports.daily', everyMin: 30, timeoutMin: 10, run: () => runDailyReport() },  // self-dedupes per day
@@ -49,7 +53,7 @@ export async function runJob(job: JobDef, force = false): Promise<'OK' | 'FAILED
     if (!got) return 'LOCKED';
     try {
       if (!force) {
-        const last = (await client.query(`SELECT started_at, status FROM job_runs WHERE job=$1 AND status IN ('OK','FAILED') ORDER BY started_at DESC LIMIT 1`, [job.name])).rows[0];
+        const last = (await client.query(`SELECT started_at, status FROM job_runs WHERE job=$1 AND status IN ('OK','FAILED','SKIPPED') ORDER BY started_at DESC LIMIT 1`, [job.name])).rows[0];
         const backoff = last?.status === 'FAILED' ? Math.min(job.everyMin, 5) : job.everyMin; // retry failed jobs sooner
         if (last && Date.now() - new Date(last.started_at).getTime() < backoff * 60_000) return 'NOT_DUE';
         if (job.when && !job.when()) return 'NOT_DUE';
@@ -97,3 +101,22 @@ export function tickConcurrent() {
   }
 }
 export function runningJobs() { return [...running]; }
+
+/**
+ * Serverless mode (Vercel Cron / external pinger): run due jobs sequentially within a time budget.
+ * Orders first; long research jobs only start if enough budget remains.
+ */
+export async function runDueJobs(budgetMs = 240_000) {
+  const started = Date.now();
+  const order = ['orders.cycle', 'orders.reconcile', 'orders.tracking', 'inventory.sync', 'ops.selfcheck', 'ops.fx', 'health.check',
+    'research.discover', 'sourcing.match', 'evaluation.run', 'listing.publish', 'pricing.reprice', 'growth.lifecycle', 'growth.cash', 'growth.ads', 'support.returns', 'reports.daily', 'reports.weekly'];
+  const results: Record<string, string> = {};
+  for (const name of order) {
+    const job = JOBS.find((j) => j.name === name);
+    if (!job) continue;
+    const left = budgetMs - (Date.now() - started);
+    if (left < 30_000) { results[name] = 'DEFERRED'; continue; }
+    results[name] = await runJob(job);
+  }
+  return { ms: Date.now() - started, results };
+}

@@ -4,7 +4,7 @@
   "description": "Autonomous, policy-compliant e-commerce operations system (Amazon EU / eBay EU)",
   "main": "dist/src/server.js",
   "scripts": {
-    "build": "tsc -p . && mkdir -p dist/src/db/migrations && cp src/db/migrations/*.sql dist/src/db/migrations/",
+    "build": "node scripts/embed-migrations.mjs && tsc -p .",
     "start:web": "node dist/src/server.js",
     "start:worker": "node dist/src/worker.js",
     "dev:web": "tsx src/server.ts",
@@ -13,7 +13,8 @@
     "simulate": "tsx scripts/simulate.ts",
     "test": "vitest run",
     "typecheck": "tsc -p . --noEmit",
-    "migrate:dev": "tsx src/db/migrate.ts"
+    "migrate:dev": "tsx src/db/migrate.ts",
+    "pretest": "node scripts/embed-migrations.mjs"
   },
   "license": "UNLICENSED",
   "dependencies": {

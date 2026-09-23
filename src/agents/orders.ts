@@ -7,13 +7,15 @@
 import { many, one, db, tx } from '../db/pool.js';
 import { calculateProfit } from '../domain/profit.js';
 import { checkSpend, fraudScore } from '../domain/risk.js';
-import { toSek } from '../services/fx.js';
+import { toSek, fromSek } from '../services/fx.js';
 import { logAction, audit } from '../services/audit.js';
 import { raiseAlert, requestApproval, approvalStatus } from '../services/alerts.js';
 import { HttpError } from '../integrations/http.js';
 import { profitInputFor } from './evaluation.js';
 import { pauseListing } from './listing.js';
 import { ctx, estimateReturnRate } from './context.js';
+import { MockMarketplace } from '../integrations/mock/index.js';
+import { env } from '../config/env.js';
 
 const SERVED_COUNTRIES = ['SE', 'DE', 'AT', 'DK', 'FI', 'NO', 'NL', 'BE', 'FR', 'IT', 'ES', 'PL'];
 
@@ -24,6 +26,12 @@ export async function ingestOrders() {
   for (const mp of c.marketplaces) {
     const adapter = c.reg.marketplaces.get(mp.code);
     if (!adapter) continue;
+    // Simulation only: fake customer demand for active listings (read from DB so it works on serverless).
+    if (c.mode === 'simulation' && env().SIM_DEMAND === '1' && adapter instanceof MockMarketplace) {
+      for (const l of await many(`SELECT sku, price, quantity FROM listings WHERE marketplace_code=$1 AND status='ACTIVE' AND quantity > 0`, [mp.code])) {
+        if (Math.random() < 0.15) adapter.injectOrder(l.sku, 1, await fromSek(Number(l.price), mp.currency));
+      }
+    }
     const last = await one<{ t: Date }>(`SELECT max(started_at) AS t FROM job_runs WHERE job='orders.cycle' AND status='OK'`);
     const since = new Date((last?.t ? new Date(last.t).getTime() : Date.now() - 7 * 864e5) - 2 * 36e5); // 2h overlap, dedup by unique key
     const orders = await adapter.fetchOrders(since);

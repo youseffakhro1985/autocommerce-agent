@@ -19,11 +19,13 @@ export interface ScoreInput {
   priceStddevPct?: number | null;
   stock?: number | null;
   stockBuffer: number;
+  rating?: number | null;               // competitors' average rating (low = room to be better)
+  negativeThemeCount?: number | null;   // distinct recurring complaint themes (licensed review data)
 }
 
 export const WEIGHTS = {
-  demand: 0.20, competition: 0.15, margin: 0.20, trend: 0.08, supplier: 0.12,
-  delivery: 0.08, returnRisk: 0.07, regulatory: 0.05, priceStability: 0.03, stockStability: 0.02,
+  demand: 0.17, competition: 0.13, margin: 0.18, trend: 0.06, supplier: 0.10, delivery: 0.06, returnRisk: 0.07,
+  regulatory: 0.05, priceStability: 0.03, stockStability: 0.02, scalability: 0.07, differentiation: 0.06,
 } as const;
 
 const clamp = (n: number, lo = 0, hi = 100) => Math.max(lo, Math.min(hi, n));
@@ -61,6 +63,21 @@ export function scoreOpportunity(i: ScoreInput) {
   c.regulatory = i.complianceRisk === 'LOW' ? 100 : i.complianceRisk === 'MEDIUM' ? 50 : i.complianceRisk === 'HIGH' ? 0 : (missing.push('regulatory'), 0);
   c.priceStability = i.priceStddevPct != null ? clamp(100 - i.priceStddevPct * 5) : (missing.push('priceStability'), 50);
   c.stockStability = i.stock != null ? clamp((i.stock / (i.stockBuffer * 3)) * 100) : (missing.push('stock'), 0);
+
+  // Scalability: supplier capacity × demand headroom (can volume grow without breaking supply?)
+  if (i.stock != null && (i.estMonthlySales != null || i.salesRankDrops30d != null)) {
+    const demand = i.estMonthlySales ?? (i.salesRankDrops30d ?? 0) * 1.5;
+    c.scalability = clamp(Math.min(50, (i.stock / 400) * 50) + Math.min(50, (demand / 600) * 50));
+  } else { c.scalability = 30; missing.push('scalability'); }
+  reasons.push(`scalability ${c.scalability.toFixed(0)}/100 (stock ${i.stock ?? '?'}, demand ${i.estMonthlySales ?? '?'}/mo)`);
+  // Differentiation: weak incumbents (low rating, recurring complaints) = room for a better product.
+  if (i.rating != null || i.negativeThemeCount != null) {
+    let d = 40;
+    if (i.rating != null) d += i.rating < 4.0 ? 35 : i.rating < 4.3 ? 20 : i.rating < 4.5 ? 8 : 0;
+    if (i.negativeThemeCount != null) d += Math.min(25, i.negativeThemeCount * 8);
+    c.differentiation = clamp(d);
+  } else { c.differentiation = 40; missing.push('differentiation'); }
+  reasons.push(`differentiation ${c.differentiation.toFixed(0)}/100 (competitor rating ${i.rating ?? '?'}, complaint themes ${i.negativeThemeCount ?? '?'})`);
 
   if (c.trend >= 65) reasons.push('rising trend'); else if (c.trend <= 35) reasons.push('declining trend');
   if (c.delivery < 50) reasons.push(`slow delivery (${i.deliveryDaysMax} days)`);

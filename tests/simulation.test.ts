@@ -24,6 +24,7 @@ const { runOrderCycle, syncTracking, reconcileSupplierOrders } = await import('.
 const { runHealth } = await import('../src/agents/health.js');
 const { buildDailyReport } = await import('../src/agents/reports.js');
 const { JOBS, runJob } = await import('../src/scheduler.js');
+const { growthSnapshot, runLifecycle, runWinnerAnalysis, runCashGuard } = await import('../src/agents/growth.js');
 
 const amazon = () => registry().marketplaces.get('AMAZON_SE') as MockMarketplace;
 const supplier = () => registry().suppliers.get('MOCK_EU_WHOLESALE') as MockSupplier;
@@ -192,5 +193,27 @@ describe('autonomous pipeline (simulation)', () => {
     expect(n.n).toBeGreaterThan(20);
     const agents = await many(`SELECT DISTINCT agent FROM agent_actions`);
     expect(agents.map((a) => a.agent)).toEqual(expect.arrayContaining(['research', 'evaluation', 'listing', 'orders', 'health']));
+  });
+
+  it('growth engine: real ledger, targets, winner analysis, cash guard — no invented results', async () => {
+    const g = await growthSnapshot();
+    const withSales = g.skus.filter((x) => x.orders > 0);
+    expect(withSales.length).toBeGreaterThan(0);
+    const booked = await one(`SELECT COALESCE(sum(amount_sek),0)::float s FROM transactions WHERE kind='SALE'`);
+    expect(g.skus.reduce((a, x) => a + x.revenueGross, 0)).toBeCloseTo(Number(booked.s), 0);
+    expect(g.base.basis).not.toBe('REAL'); // < 30 orders => never labelled REAL
+    expect(g.targets.every((t) => !t.reached)).toBe(true);
+    expect(g.targets).toHaveLength(6);
+    const l = withSales[0];
+    await db().query(`INSERT INTO supplier_quotes(product_id, supplier_name, supplier_type, unit_price, currency, moq, source, verified)
+      SELECT product_id, 'Test Manufacturer', 'MANUFACTURER', 3.5, 'EUR', 500, 'owner_entered', true FROM listings WHERE id=$1`, [l.listingId]);
+    const id = await runWinnerAnalysis(l.listingId);
+    const wa = await one(`SELECT * FROM winner_analyses WHERE id=$1`, [id]);
+    expect(wa.analysis).toHaveLength(15);
+    expect(wa.analysis[0].status).toBe('OPPORTUNITY');
+    expect(wa.analysis[5].status).toBe('BLOCKED'); // no licensed review source
+    await runLifecycle();
+    const cash = await runCashGuard();
+    expect(Object.keys(cash.at)).toEqual(['7', '30', '60', '90']);
   });
 });
