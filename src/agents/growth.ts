@@ -275,6 +275,11 @@ export async function runCashGuard() {
   const skus = await skuLedger(30);
   const cash = await cashSnapshot(c.s, skus);
   const f = cash.forecast;
+  if (c.s.CURRENT_CASH_SEK <= 0) {
+    await raiseAlert({ severity: 'WARNING', category: 'OWNER_ACTION', title: 'NEEDS OWNER ACTION: set CURRENT_CASH_SEK (available business cash) in Settings — cash-flow forecast and order spending stay blocked until then', dedupeKey: 'cash-unset', requiresOwner: true });
+    return { skipped: 'cash not set' };
+  }
+  await resolveAlert('cash-unset');
   if (f.breachDay != null && f.breachDay <= 60) {
     await raiseAlert({ severity: f.breachDay <= 14 ? 'CRITICAL' : 'WARNING', category: 'CASH', title: `Cash forecast: buffer ${c.s.MIN_CASH_BUFFER_SEK} SEK breached in ${f.breachDay} days (min ${Math.round(f.minCash)} SEK day ${f.minDay})`, dedupeKey: 'cash-breach', requiresOwner: true });
   } else await resolveAlert('cash-breach');
